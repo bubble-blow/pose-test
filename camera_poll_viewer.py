@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import time
+from typing import Literal
 
 import cv2
 import mediapipe as mp
@@ -21,6 +22,11 @@ MAX_NUM_HANDS = 2
 MIN_DETECTION_CONFIDENCE = 0.5
 MIN_TRACKING_CONFIDENCE = 0.5
 
+# 手势触发配置
+PHOTO_HINT_TEXT = "Snap!"
+PHOTO_HINT_DURATION = 0.5  # 秒
+
+GestureName = Literal["rock", "scissors", "other", "none"]
 
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
@@ -37,13 +43,43 @@ def fetch_jpeg(url: str, timeout: float) -> np.ndarray | None:
     return frame
 
 
-def draw_hand_skeleton(frame: np.ndarray, hands: mp_hands.Hands) -> np.ndarray:
-    """Run MediaPipe Hands and draw landmarks/connection skeleton on frame."""
+def is_finger_extended(
+    landmarks: list[mp.framework.formats.landmark_pb2.NormalizedLandmark],
+    tip_idx: int,
+    pip_idx: int,
+) -> bool:
+    """Heuristic for non-thumb fingers in image coordinates (y smaller means higher)."""
+    return landmarks[tip_idx].y < landmarks[pip_idx].y
+
+
+def classify_gesture(
+    landmarks: list[mp.framework.formats.landmark_pb2.NormalizedLandmark],
+) -> GestureName:
+    """Classify simple hand gestures: rock / scissors / other."""
+    index_up = is_finger_extended(landmarks, mp_hands.HandLandmark.INDEX_FINGER_TIP, mp_hands.HandLandmark.INDEX_FINGER_PIP)
+    middle_up = is_finger_extended(landmarks, mp_hands.HandLandmark.MIDDLE_FINGER_TIP, mp_hands.HandLandmark.MIDDLE_FINGER_PIP)
+    ring_up = is_finger_extended(landmarks, mp_hands.HandLandmark.RING_FINGER_TIP, mp_hands.HandLandmark.RING_FINGER_PIP)
+    pinky_up = is_finger_extended(landmarks, mp_hands.HandLandmark.PINKY_TIP, mp_hands.HandLandmark.PINKY_PIP)
+
+    # 简化处理：不强依赖拇指状态，重点识别“石头->剪刀”
+    if not index_up and not middle_up and not ring_up and not pinky_up:
+        return "rock"
+    if index_up and middle_up and not ring_up and not pinky_up:
+        return "scissors"
+    return "other"
+
+
+def process_hand_and_draw(
+    frame: np.ndarray,
+    hands: mp_hands.Hands,
+) -> tuple[np.ndarray, GestureName]:
+    """Run MediaPipe Hands, draw skeleton, and return first hand gesture class."""
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = hands.process(rgb)
 
+    current_gesture: GestureName = "none"
     if results.multi_hand_landmarks:
-        for hand_landmarks in results.multi_hand_landmarks:
+        for idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
             mp_drawing.draw_landmarks(
                 frame,
                 hand_landmarks,
@@ -51,12 +87,25 @@ def draw_hand_skeleton(frame: np.ndarray, hands: mp_hands.Hands) -> np.ndarray:
                 mp_styles.get_default_hand_landmarks_style(),
                 mp_styles.get_default_hand_connections_style(),
             )
+            if idx == 0:
+                current_gesture = classify_gesture(hand_landmarks.landmark)
 
-    return frame
+    return frame, current_gesture
+
+
+def draw_photo_hint(frame: np.ndarray, text: str) -> None:
+    """Draw a centered photo hint on the frame."""
+    h, w = frame.shape[:2]
+    org = (int(w * 0.35), int(h * 0.12))
+    cv2.putText(frame, text, org, cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 0, 0), 5, cv2.LINE_AA)
+    cv2.putText(frame, text, org, cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 255), 2, cv2.LINE_AA)
 
 
 def main() -> None:
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+
+    last_gesture: GestureName = "none"
+    photo_hint_until = 0.0
 
     with mp_hands.Hands(
         static_image_mode=False,
@@ -72,7 +121,17 @@ def main() -> None:
                     time.sleep(RETRY_DELAY)
                     continue
 
-                frame = draw_hand_skeleton(frame, hands)
+                frame, current_gesture = process_hand_and_draw(frame, hands)
+
+                # 相邻两帧：石头 -> 剪刀，触发拍照提示 0.5 秒
+                now = time.monotonic()
+                if last_gesture == "rock" and current_gesture == "scissors":
+                    photo_hint_until = now + PHOTO_HINT_DURATION
+
+                if now < photo_hint_until:
+                    draw_photo_hint(frame, PHOTO_HINT_TEXT)
+
+                last_gesture = current_gesture
 
                 height, width = frame.shape[:2]
                 cv2.resizeWindow(WINDOW_NAME, width, height)
