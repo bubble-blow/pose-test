@@ -153,7 +153,7 @@ def main() -> None:
                 last_gesture = current_gesture
 
                 height, width = frame.shape[:2]
-                cv2.resizeWindow(WINDOW_NAME, width, height)
+                cv2.resizeWindow(WINDOW_NAME, max(1, width // 2), max(1, height // 2))
                 cv2.imshow(WINDOW_NAME, frame)
 
             except requests.RequestException as exc:
