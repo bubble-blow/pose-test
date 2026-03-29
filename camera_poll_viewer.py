@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Literal
 
@@ -11,7 +12,13 @@ import mediapipe as mp
 import numpy as np
 import requests
 
-from network_config import JPEG_URL, REQUEST_TIMEOUT, RETRY_DELAY
+from network_config import (
+    JPEG_URL,
+    PREPARE_PHOTO_URL,
+    PREPARE_REQUEST_TIMEOUT,
+    REQUEST_TIMEOUT,
+    RETRY_DELAY,
+)
 
 WINDOW_NAME = "Camera Stream (press q to quit)"
 
@@ -91,6 +98,19 @@ def process_hand_and_draw(
     return frame, current_gesture
 
 
+
+
+def fire_prepare_photo_request() -> None:
+    """Send a best-effort GET request to notify photo preparation (ignore response)."""
+
+    def _send() -> None:
+        try:
+            requests.get(PREPARE_PHOTO_URL, timeout=PREPARE_REQUEST_TIMEOUT)
+        except requests.RequestException:
+            pass
+
+    threading.Thread(target=_send, daemon=True).start()
+
 def draw_photo_hint(frame: np.ndarray, text: str) -> None:
     """Draw a centered photo hint on the frame."""
     h, w = frame.shape[:2]
@@ -125,6 +145,7 @@ def main() -> None:
                 now = time.monotonic()
                 if last_gesture == "rock" and current_gesture == "scissors":
                     photo_hint_until = now + PHOTO_HINT_DURATION
+                    fire_prepare_photo_request()
 
                 if now < photo_hint_until:
                     draw_photo_hint(frame, PHOTO_HINT_TEXT)
