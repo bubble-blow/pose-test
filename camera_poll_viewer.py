@@ -11,10 +11,8 @@ import mediapipe as mp
 import numpy as np
 import requests
 
-# 修改为你的固定后端地址
-JPEG_URL = "http://127.0.0.1:8000/frame.jpg"
-REQUEST_TIMEOUT = 5  # 秒
-RETRY_DELAY = 0.2  # 出错时重试间隔（秒）
+from network_config import JPEG_URL, REQUEST_TIMEOUT, RETRY_DELAY
+
 WINDOW_NAME = "Camera Stream (press q to quit)"
 
 # MediaPipe Hands 配置
