@@ -37,6 +37,8 @@ def main() -> None:
                 time.sleep(RETRY_DELAY)
                 continue
 
+            height, width = frame.shape[:2]
+            cv2.resizeWindow(WINDOW_NAME, width, height)
             cv2.imshow(WINDOW_NAME, frame)
 
         except requests.RequestException as exc:
